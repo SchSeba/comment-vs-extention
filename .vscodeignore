@@ -1,0 +1,11 @@
+.gitignore
+.github/**
+.containerignore
+.vscodeignore
+AGENTS.md
+Dockerfile.codeserver
+docker/**
+docs/**
+tests/**
+scripts/**
+*.vsix

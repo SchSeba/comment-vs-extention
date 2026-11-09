@@ -1,0 +1,49 @@
+# Development image derived from Task Tracker's Dockerfile.codeserver.
+ARG TASK_TRACKER_IMAGE=quay.io/schseba/task-tracker-codeserver:latest
+FROM ${TASK_TRACKER_IMAGE} AS ide
+ARG CODEX_IDE_VERSION=26.908.40401
+
+USER root
+RUN rm -f /etc/sudoers.d/tasktracker && \
+    install -d -m 0700 -o 1001 -g 1001 /home/tasktracker/.codex \
+        /home/tasktracker/.local/share/code-server /home/tasktracker/workspace
+COPY --chmod=0755 docker/start-codeserver.sh /usr/local/bin/local-review-codeserver
+
+ENV HOME=/home/tasktracker CODEX_HOME=/home/tasktracker/.codex
+USER 1001
+# Installing an explicit version pins it in VS Code's extension registry.
+RUN code-server --extensions-dir "$CODE_SERVER_EXTENSIONS_DIR" \
+    --uninstall-extension tasktracker.auto-pr-diff && \
+    code-server --extensions-dir "$CODE_SERVER_EXTENSIONS_DIR" \
+    --uninstall-extension openai.chatgpt && \
+    code-server --extensions-dir "$CODE_SERVER_EXTENSIONS_DIR" \
+    --install-extension "openai.chatgpt@$CODEX_IDE_VERSION"
+
+ENTRYPOINT ["dumb-init", "--", "local-review-codeserver"]
+CMD ["/home/tasktracker/workspace"]
+
+FROM ide AS package
+USER root
+WORKDIR /opt/build-local-review
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY .vscodeignore README.md extension.cjs review-store.cjs review-context.cjs mcp.cjs ./
+COPY skills/ ./skills/
+RUN npm run package
+
+FROM ide AS dev
+COPY --from=package /opt/build-local-review/local-review.vsix /opt/local-review.vsix
+RUN code-server --extensions-dir "$CODE_SERVER_EXTENSIONS_DIR" \
+    --install-extension /opt/local-review.vsix
+USER root
+RUN set -eu; \
+    set -- "$CODE_SERVER_EXTENSIONS_DIR"/local-review.local-review-*/mcp.cjs; \
+    test "$#" = 1; \
+    test -f "$1"; \
+    skills="$(dirname "$1")/skills"; \
+    test -f "$skills/handle-comments/SKILL.md"; \
+    test -f "$skills/mark-resolved-review/SKILL.md"; \
+    test -f "$skills/clean-review/SKILL.md"; \
+    ln -s "$1" /opt/local-review-mcp.cjs; \
+    ln -s "$skills" /opt/local-review-skills
+USER 1001

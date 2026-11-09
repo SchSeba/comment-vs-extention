@@ -1,0 +1,119 @@
+{
+  "name": "local-review",
+  "displayName": "Local Review",
+  "description": "Leave comments in Source Control diffs and address them from Codex.",
+  "version": "0.1.3",
+  "publisher": "local-review",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SchSeba/comment-vs-extention.git"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "main": "./extension.cjs",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "localReview.add",
+        "title": "Add Review Comment"
+      },
+      {
+        "command": "localReview.dismiss",
+        "title": "Dismiss Review Comment",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "localReview.resolve",
+        "title": "Resolve Review Comment",
+        "icon": "$(check)"
+      },
+      {
+        "command": "localReview.mark-resolved-review",
+        "title": "Local Review: Mark Resolved Review"
+      },
+      {
+        "command": "localReview.clean-review",
+        "title": "Local Review: Clean Review"
+      },
+      {
+        "command": "localReview.copyPrompt",
+        "title": "Local Review: Copy Codex Follow-up"
+      },
+      {
+        "command": "localReview.inspectCodex",
+        "title": "Local Review: Inspect Codex Integration"
+      }
+    ],
+    "menus": {
+      "comments/commentThread/context": [
+        {
+          "command": "localReview.add",
+          "when": "commentController == local-review && !commentThread",
+          "group": "navigation"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "localReview.resolve",
+          "when": "commentController == local-review && commentThread == saved",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localReview.dismiss",
+          "when": "commentController == local-review && (commentThread == saved || commentThread == resolved)",
+          "group": "navigation@2"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "localReview.copyPrompt",
+          "when": "scmProvider == git"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "localReview.add",
+          "when": "false"
+        },
+        {
+          "command": "localReview.dismiss",
+          "when": "false"
+        },
+        {
+          "command": "localReview.resolve",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "package": "vsce package --allow-missing-repository --skip-license --out local-review.vsix"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "4.1.0"
+  },
+  "overrides": {
+    "@vscode/vsce": {
+      "minimatch": "11.0.5"
+    }
+  }
+}
