@@ -2,7 +2,7 @@
   "name": "local-review",
   "displayName": "Local Review",
   "description": "Leave comments in Source Control diffs and address them from Codex.",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "publisher": "local-review",
   "repository": {
     "type": "git",
@@ -32,6 +32,10 @@
         "title": "Add Review Comment"
       },
       {
+        "command": "localReview.followUp",
+        "title": "Add Review Follow-up"
+      },
+      {
         "command": "localReview.dismiss",
         "title": "Dismiss Review Comment",
         "icon": "$(trash)"
@@ -51,7 +55,12 @@
       },
       {
         "command": "localReview.copyPrompt",
-        "title": "Local Review: Copy Codex Follow-up"
+        "title": "Local Review: Copy Codex Follow-up",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "localReview.adopt-legacy",
+        "title": "Local Review: Import Older Comments"
       },
       {
         "command": "localReview.inspectCodex",
@@ -62,31 +71,41 @@
       "comments/commentThread/context": [
         {
           "command": "localReview.add",
-          "when": "commentController == local-review && !commentThread",
+          "when": "commentController =~ /^local-review-/ && !commentThread",
+          "group": "navigation"
+        },
+        {
+          "command": "localReview.followUp",
+          "when": "commentController =~ /^local-review-/ && commentThread == addressed",
           "group": "navigation"
         }
       ],
       "comments/commentThread/title": [
         {
           "command": "localReview.resolve",
-          "when": "commentController == local-review && commentThread == saved",
+          "when": "commentController =~ /^local-review-/ && (commentThread == saved || commentThread == addressed)",
           "group": "navigation@1"
         },
         {
           "command": "localReview.dismiss",
-          "when": "commentController == local-review && (commentThread == saved || commentThread == resolved)",
+          "when": "commentController =~ /^local-review-/ && (commentThread == saved || commentThread == addressed || commentThread == resolved)",
           "group": "navigation@2"
         }
       ],
       "scm/title": [
         {
           "command": "localReview.copyPrompt",
-          "when": "scmProvider == git"
+          "when": "scmProvider == git",
+          "group": "navigation@40"
         }
       ],
       "commandPalette": [
         {
           "command": "localReview.add",
+          "when": "false"
+        },
+        {
+          "command": "localReview.followUp",
           "when": "false"
         },
         {
