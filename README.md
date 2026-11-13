@@ -2,6 +2,12 @@
 
 Leave inline comments on uncommitted Git changes in VS Code, then ask Codex to address them in your current terminal session or the official Codex sidebar. Codex reads the pending comments, makes the fixes, and writes a short summary for each comment. The summaries appear in the chat and on their matching VS Code comments.
 
+## Why we built Local Review
+
+When reviewing agent-generated changes, we kept moving between the diff in the chat and the diff in VS Code's Source Control. A diff shown inside a chat can show what changed while leaving out the editor actions we rely on, such as **Go to Definition**, **Go to Implementation**, and **Find All References**. We wanted to inspect the code with those tools and leave feedback on the exact line while we were there.
+
+Local Review bridges VS Code's native Git review and your existing Codex conversation. Open the changed file in **Source Control**, use the usual editor navigation to understand the change, and leave an inline comment. Submit the review follow-up in Codex to send the pending feedback. Codex's replies appear in the same VS Code threads, where you can continue the review.
+
 Local Review uses the built-in **Source Control** diff and **Comments** panel. It stores comments and replies per Git checkout and branch under `$CODEX_HOME/local-review` (default `~/.codex/local-review`). A detached HEAD gets its own review for that commit. Codex keeps the conversation history in your existing session.
 
 ## Install in VS Code
