@@ -119,11 +119,10 @@ function isInWorktree(root, file) {
         !parts.some(part => part.toLowerCase() === '.git');
 }
 
-async function readWorkingContext(repository, comment, ownsFile) {
-    if (comment.side !== 'working') return { status: 'original-side' };
+async function readWorkingFile(repository, relativeFile, ownsFile) {
     try {
         const root = await fs.realpath(repository);
-        const file = path.resolve(root, comment.file);
+        const file = path.resolve(root, relativeFile);
         if (!isInWorktree(root, file)) return { status: 'unavailable' };
         const target = await fs.realpath(file);
         if (!isInWorktree(root, target)) return { status: 'unavailable' };
@@ -146,7 +145,7 @@ async function readWorkingContext(repository, comment, ownsFile) {
                 return { status: 'unavailable' };
             }
             const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length));
-            return text.includes('\0') ? { status: 'unavailable' } : describeWorkingContext(comment, text);
+            return text.includes('\0') ? { status: 'unavailable' } : { text };
         } finally {
             await handle.close();
         }
@@ -159,4 +158,10 @@ async function readWorkingContext(repository, comment, ownsFile) {
     }
 }
 
-module.exports = { captureNearbyLines, describeWorkingContext, isInWorktree, maxExcerptLength, readWorkingContext };
+async function readWorkingContext(repository, comment, ownsFile) {
+    if (comment.side !== 'working') return { status: 'original-side' };
+    const source = await readWorkingFile(repository, comment.file, ownsFile);
+    return source.text === undefined ? source : describeWorkingContext(comment, source.text);
+}
+
+module.exports = { captureNearbyLines, describeWorkingContext, isInWorktree, maxExcerptLength, readWorkingContext, readWorkingFile };

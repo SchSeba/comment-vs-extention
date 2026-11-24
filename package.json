@@ -36,6 +36,19 @@
         "title": "Add Review Follow-up"
       },
       {
+        "command": "localReview.edit",
+        "title": "Edit Review Comment",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "localReview.saveEdit",
+        "title": "Save Review Edit"
+      },
+      {
+        "command": "localReview.cancelEdit",
+        "title": "Cancel"
+      },
+      {
         "command": "localReview.dismiss",
         "title": "Dismiss Review Comment",
         "icon": "$(trash)"
@@ -67,7 +80,33 @@
         "title": "Local Review: Inspect Codex Integration"
       }
     ],
+    "keybindings": [
+      {
+        "command": "editor.action.submitComment",
+        "key": "ctrl+enter",
+        "when": "commentEditorFocused && commentController =~ /^local-review-/"
+      }
+    ],
     "menus": {
+      "comments/comment/title": [
+        {
+          "command": "localReview.edit",
+          "when": "commentController =~ /^local-review-/ && comment == pendingFeedback",
+          "group": "inline"
+        }
+      ],
+      "comments/comment/context": [
+        {
+          "command": "localReview.saveEdit",
+          "when": "commentController =~ /^local-review-/ && comment == editingFeedback",
+          "group": "inline@1"
+        },
+        {
+          "command": "localReview.cancelEdit",
+          "when": "commentController =~ /^local-review-/ && comment == editingFeedback",
+          "group": "inline@2"
+        }
+      ],
       "comments/commentThread/context": [
         {
           "command": "localReview.add",
@@ -106,6 +145,18 @@
         },
         {
           "command": "localReview.followUp",
+          "when": "false"
+        },
+        {
+          "command": "localReview.edit",
+          "when": "false"
+        },
+        {
+          "command": "localReview.saveEdit",
+          "when": "false"
+        },
+        {
+          "command": "localReview.cancelEdit",
           "when": "false"
         },
         {

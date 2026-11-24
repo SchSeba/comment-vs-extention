@@ -10,7 +10,10 @@ for file in \
     extension/mcp.cjs \
     extension/review-store.cjs \
     extension/review-context.cjs \
+    extension/review-guidance.cjs \
     extension/skills/handle-comments/SKILL.md \
+    extension/skills/learn-from-comments/SKILL.md \
+    extension/skills/publish-review-learnings/SKILL.md \
     extension/skills/mark-resolved-review/SKILL.md \
     extension/skills/clean-review/SKILL.md \
     extension/node_modules/@modelcontextprotocol/sdk/dist/cjs/server/mcp.js
