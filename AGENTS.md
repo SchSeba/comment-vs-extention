@@ -12,8 +12,9 @@ Use the current source and README for shipped behavior. [The implementation plan
 | `extension.cjs` | Native comment controller, built-in Git API, diff anchors, thread refresh, follow-up clipboard action, and Codex integration diagnostics |
 | `review-store.cjs` | Shared worktree-scoped storage, atomic comment/reply publication, resolution, and cleanup |
 | `review-context.cjs` | Bounded surrounding lines, worktree-scoped current file reads, and conservative anchor matching |
-| `mcp.cjs` | Stdio server `local-review` with pending comments, fresh context, replies, bulk resolve, and cleanup |
-| `skills/` | User-facing Codex workflows `$handle-comments`, `$mark-resolved-review`, and `$clean-review` |
+| `mcp.cjs` | Stdio server `local-review` with pending comments, fresh context, replies, completed review history, bulk resolve, and cleanup |
+| `review-guidance.cjs` | Shared project guidance preamble for MCP initialization and the copied follow-up |
+| `skills/` | Codex workflows for handling, resolving, and clearing reviews, and learning and publishing project guidance |
 | `tests/mcp.test.cjs` | Node test runner and real stdio MCP client against temporary directories |
 | `Dockerfile.codeserver`, `docker/start-codeserver.sh` | Task Tracker-derived local test IDE, pinned official Codex extension, VSIX install, and user-level MCP registration |
 
@@ -37,6 +38,7 @@ npm ci
 node --check extension.cjs
 node --check review-store.cjs
 node --check review-context.cjs
+node --check review-guidance.cjs
 node --check mcp.cjs
 sh -n docker/start-codeserver.sh
 npm test
@@ -50,4 +52,4 @@ GitHub Actions builds downloadable VSIX artifacts for PRs and pushes to `main`. 
 
 Use the [README's Podman setup](README.md#local-testing-with-podman) for the browser and Codex checks. The running test container is conventionally named `local-review-codeserver` on `127.0.0.1:18765`. Its named volumes hold login and review data, editor settings, and disposable worktrees. Reuse the volumes when recreating the test container. Keep this password-free deployment on loopback.
 
-Check that `codex mcp get local-review` finds the enabled server, code-server lists `local-review.local-review`, and Codex lists all three shortcuts under `/skills`. For a full signed-in test, run separate disposable clones through the integrated terminal and official sidebar. Make an initial edit, add two comments in the native diff, submit the follow-up in the same conversation, and check both edits, both final summaries, and both inline replies after reopening. To verify worktree routing, open a common parent of two disposable Git repos, comment in both, and run Codex from just one. Check the other repo's files and review records after feedback and bulk actions. Use the user's authorization for authenticated tests and let them complete any required sign-in. Report tool discovery, fixture-driven checks, and real model tests separately. Record the exact client versions and any incomplete checks in [docs/BRIDGE_VALIDATION.md](docs/BRIDGE_VALIDATION.md).
+Check that `codex mcp get local-review` finds the enabled server, code-server lists `local-review.local-review`, and Codex lists the bundled shortcuts under `/skills`. For a full signed-in test, run separate disposable clones through the integrated terminal and official sidebar. Make an initial edit, add two comments in the native diff, submit the follow-up in the same conversation, and check both edits, both final summaries, and both inline replies after reopening. To verify worktree routing, open a common parent of two disposable Git repos, comment in both, and run Codex from just one. Check the other repo's files and review records after feedback and bulk actions. Use the user's authorization for authenticated tests and let them complete any required sign-in. Report tool discovery, fixture-driven checks, and real model tests separately. Record the exact client versions and any incomplete checks in [docs/BRIDGE_VALIDATION.md](docs/BRIDGE_VALIDATION.md).

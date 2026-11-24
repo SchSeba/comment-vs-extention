@@ -34,15 +34,19 @@ Use the [latest released VSIX](https://github.com/SchSeba/comment-vs-extention/r
    ```
 
    On Windows, quote paths containing spaces. If `local-review` is already registered, check that its command resolves to the newly installed extension, including any symlink such as `/opt/local-review-mcp.cjs`. Update the registration or symlink when it points to an older version. Both the VS Code workspace extension and Codex must use the same `CODEX_HOME`.
-5. For the Codex shortcuts, copy the `handle-comments`, `mark-resolved-review`, and `clean-review` folders from the installed extension's `skills/` to `~/.agents/skills/` on the workspace host. When upgrading, update copies you installed from Local Review and preserve user-authored edits. The Podman test image seeds missing shortcuts at startup.
-6. Run **Developer: Reload Window** in VS Code. Start Codex or use `codex resume` from the worktree and select your existing session. Use `/mcp` in Codex to check for `local-review`.
+5. For the Codex shortcuts, copy the folders under the installed extension's `skills/` to `~/.agents/skills/` on the workspace host. When upgrading, update copies you installed from Local Review and preserve user-authored edits. The Podman test image seeds missing shortcuts at startup.
+6. Run **Developer: Reload Window** in VS Code. Start Codex or use `codex resume` from the worktree and select your existing session. After upgrading, resume the session to load the updated MCP server. Use `/mcp` in Codex to check for `local-review`.
 
 ## Review and fix changes
 
 1. Open a trusted Git worktree in VS Code and ask Codex to make a change.
 2. Open **Source Control** on the left and select a changed file. Click the **+** beside a line on the working side of the diff, write your feedback, and choose **Add Review Comment**. Repeat for each fix you want.
 3. In **Source Control**, look for the clipboard icon in the toolbar next to **Changes**. With several repositories open, use **⋯ → Local Review: Copy Codex Follow-up** on the target repository's row. The action is also in the Command Palette. Paste and submit the copied prompt in your current Codex chat, or submit `$handle-comments` from the target checkout.
-4. Check the fixes in Source Control and the replies in **Comments**. To continue an **Addressed** thread, write below Codex's reply and click **Add Review Follow-up**. Submit the next review round the same way. The follow-up becomes pending and the new Codex reply appears in the same thread. Blocked feedback stays pending.
+4. Check the fixes in Source Control and the replies in **Comments**. After each Codex reply, write below it and click **Add Review Follow-up** to continue the same thread. Submit the next review round the same way. Blocked feedback stays pending.
+
+To edit a pending comment or follow-up, hover over it, click **Edit Review Comment**, then choose **Save Review Edit**. You can edit until Codex replies or you resolve the thread. While composing or editing feedback, press **Ctrl+Enter** to submit it. **Cmd+Enter** also works on macOS.
+
+When the reviewed lines change or their location is uncertain, the thread moves out of the live diff and is marked **Outdated** in **Comments**. Open it there to see the saved excerpt and continue the thread. A confidently matched selection appears on its current line.
 
 Switching branches changes which threads appear and which pending comments Codex can read. Switching back restores that branch's saved review. Submit draft comments before switching, since switching closes unsaved drafts. Named reviews follow the local branch name, including if you delete and later reuse that name. A copied prompt is tied to the checkout and branch where you copied it. If you are upgrading from 0.1.x, run **Local Review: Import Older Comments** and confirm which branch should receive the older records. Those records were saved without branch information.
 
@@ -67,13 +71,22 @@ For bulk actions in VS Code, open a file from the target worktree first. When no
 
 In your running Codex CLI session in the worktree, type **`$handle-comments`** and press Enter. You can also select **handle-comments** from `/skills`. If the shortcut is missing, install it as described above or paste the copied follow-up. This plain-language request works when the MCP tools are available:
 
-> Read my pending Local Review comments for this Git checkout and branch. Use `list_pending_comments` with the absolute worktree root. Use `get_comment_context` before each fix and pass the returned review scope to every subsequent tool call. Verify whether earlier edits already address later comments. Use `record_comment_reply` once per verified comment, print a short summary for each, and leave blocked comments pending.
+> Before fetching feedback, check this worktree's instructions and the matching project's `CODING.md`, `REVIEWING.md`, and `VALIDATION.md` in `projects/` of SchSeba/ai-plugins. Then use `list_pending_comments` with the absolute worktree root. Use `get_comment_context` before each fix and pass the returned review scope to every subsequent tool call. Verify whether earlier edits already address later comments. Use `record_comment_reply` once per verified comment and include the revision from `get_comment_context` when present. If the feedback changed, refresh it and verify the updated request before replying. Print a short summary for each comment and leave blocked comments pending.
 
 If `/mcp` is missing `local-review`, run `codex mcp get local-review` in a separate terminal on the same host. Once the server is configured, let the current turn finish and reopen the same conversation with `codex resume`.
 
 New comments save the selected excerpt and up to three numbered lines on either side, plus the language and whether the editor buffer had unsaved changes. That is what the reviewer saw. Before addressing each comment, Codex refreshes its location against the saved working file. It can find moved text and use matching nearby lines to identify an edited region. When the location is uncertain, it uses the original feedback and current code to verify the target or leaves the comment pending. A fix that also satisfies a later comment can receive a separate reply for that comment. Older comments retain their original excerpts.
 
 The Comments panel keeps feedback available after a referenced line changes. See `docs/BRIDGE_VALIDATION.md` in the project for tested clients and the user-submitted follow-up flow.
+
+### Project guidance and review learnings
+
+The copied prompt, `$handle-comments`, and the MCP server instructions ask Codex to check the worktree's instructions and load the project's `CODING.md`, `REVIEWING.md`, and `VALIDATION.md` from `projects/<project>/` before fetching feedback. Codex receives the copied prompt as your follow-up in the existing chat. [ai-plugins](https://github.com/SchSeba/ai-plugins)
+
+- Run `$learn-from-comments` from the reviewed checkout to apply the ai-plugins retrospective to completed local threads, including resolved threads. [Retrospective skill](https://github.com/SchSeba/ai-plugins/blob/main/skills/retrospective/SKILL.md)
+- Run `$publish-review-learnings` after the review to clone ai-plugins into a temporary directory, validate supported updates to its project guidance, and open a PR when there is a new lesson suitable for publication.
+
+Run these before **Clean Review**, which removes the saved evidence. The publishing workflow needs GitHub access to push a branch and open a PR in ai-plugins.
 
 ## Local testing with Podman
 

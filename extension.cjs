@@ -2,14 +2,16 @@ const vscode = require('vscode');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { captureNearbyLines, isInWorktree, maxExcerptLength } = require('./review-context.cjs');
+const { projectGuidance } = require('./review-guidance.cjs');
+const { captureNearbyLines, describeWorkingContext, isInWorktree, maxExcerptLength, readWorkingFile } = require('./review-context.cjs');
 const {
-    addComment, addFollowUp, adoptLegacyComments, cleanReview, dismissComment, fileBelongsToReview, getComment, getReviewScope,
-    isPendingComment, listComments, listLegacyComments, maxFeedbackLength, requireReviewScope,
-    resolveAnsweredComments, resolveComment
+    addComment, addFollowUp, adoptLegacyComments, cleanReview, dismissComment, editFeedback, fileBelongsToReview,
+    getComment, getReviewScope, isPendingComment, listComments, listLegacyComments, requireReviewScope,
+    resolveAnsweredComments, resolveComment, validateFeedback
 } = require('./review-store.cjs');
 
 const hash = text => createHash('sha256').update(text).digest('hex');
+const outdatedScheme = 'local-review-outdated';
 
 function fileFor(uri) {
     if (uri.scheme === 'file') return uri;
@@ -38,21 +40,20 @@ function lineRange(document, first, last) {
     return new vscode.Range(document.lineAt(first).range.start, document.lineAt(last).range.end);
 }
 
-function locateAnchor(comment, document) {
-    if (!document) return new vscode.Range(comment.firstLine - 1, 0, comment.lastLine - 1, 0);
-    const first = comment.firstLine - 1;
-    const last = comment.lastLine - 1;
-    if (last < document.lineCount) {
-        const range = lineRange(document, first, last);
-        if (hash(document.getText(range)) === comment.digest) return range;
+function openDocument(uri) {
+    return vscode.workspace.textDocuments.find(document => document.uri.toString() === uri);
+}
+
+function locateAnchor(comment, source) {
+    if (!source) return;
+    const match = comment.sourceDigest === source.digest ? comment : describeWorkingContext(comment, source.text);
+    if (match === comment || match.status === 'unchanged' || match.status === 'moved') {
+        return new vscode.Range(match.firstLine - 1, 0, match.lastLine - 1, 0);
     }
-    if (!comment.excerpt || comment.truncated) return undefined;
-    const text = document.getText();
-    const excerpt = document.eol === vscode.EndOfLine.CRLF ? comment.excerpt.replace(/\r?\n/g, '\r\n') : comment.excerpt;
-    const index = text.indexOf(excerpt);
-    if (index < 0 || text.indexOf(excerpt, index + 1) >= 0) return undefined;
-    const range = new vscode.Range(document.positionAt(index), document.positionAt(index + excerpt.length));
-    if (range.start.character === 0 && range.end.isEqual(document.lineAt(range.end.line).range.end)) return range;
+}
+
+function textSource(text) {
+    return { text, digest: hash(text) };
 }
 
 function plainText(text) {
@@ -89,6 +90,8 @@ async function activate(context) {
     const output = vscode.window.createOutputChannel('Local Review');
     const threads = new Map();
     const ids = new WeakMap();
+    const editableComments = new WeakMap();
+    const documentSources = new WeakMap();
     const controllers = new Map();
     const repositoryListeners = new Map();
     let queue = Promise.resolve();
@@ -121,26 +124,76 @@ async function activate(context) {
         return result;
     }
 
-    function refreshThread(repository, scope, entries, newThread) {
-        const [comment] = entries;
+    function documentSource(document) {
+        const cached = documentSources.get(document);
+        if (cached?.version === document.version) return cached;
+        const source = { ...textSource(document.getText()), version: document.version };
+        documentSources.set(document, source);
+        return source;
+    }
+
+    async function readReviewSource(repository, scope, comment) {
         const uri = vscode.Uri.parse(comment.uri);
-        const document = vscode.workspace.textDocuments.find(item => item.uri.toString() === comment.uri);
-        const range = locateAnchor(comment, document);
-        const key = `${scope.key}:${comment.id}`;
-        const existing = threads.get(key);
-        const thread = existing?.thread ?? newThread ?? controllerFor(repository, scope).createCommentThread(uri, range, []);
-        const item = existing ?? { thread, repository, scope, id: comment.id };
-        if (!existing) {
-            threads.set(key, item);
-            ids.set(thread, key);
-            thread.collapsibleState = newThread ? vscode.CommentThreadCollapsibleState.Expanded : vscode.CommentThreadCollapsibleState.Collapsed;
+        if (location(git, uri)?.repository !== repository) return;
+        const open = openDocument(comment.uri);
+        if (open) return documentSource(open);
+        if (uri.scheme === 'git') {
+            const document = await vscode.workspace.openTextDocument(uri).then(value => value, () => undefined);
+            return document && documentSource(document);
         }
-        const pending = entries.some(isPendingComment);
+        const { text } = await readWorkingFile(scope.root, comment.file, file => fileBelongsToReview(scope, file));
+        if (text !== undefined) return textSource(text);
+    }
+
+    function reviewMessages(item, entries) {
+        return entries.flatMap(entry => {
+            const feedback = { author: { name: 'You' }, body: entry.feedback, mode: vscode.CommentMode.Preview };
+            if (isPendingComment(entry)) {
+                feedback.contextValue = 'pendingFeedback';
+                editableComments.set(feedback, { item, entry });
+            }
+            const messages = [feedback];
+            if (entry.reply) messages.push({ author: { name: 'Codex' }, body: plainText(entry.reply.summary), mode: vscode.CommentMode.Preview });
+            return messages;
+        });
+    }
+
+    function refreshThread(repository, scope, entries, source, newThread) {
+        const [comment] = entries;
+        const originalUri = vscode.Uri.parse(comment.uri);
+        const range = locateAnchor(comment, source);
+        const key = `${scope.key}:${comment.id}`;
+        const uri = range ? originalUri : originalUri.with({
+            scheme: outdatedScheme, path: `${originalUri.path} (Outdated)`, query: key, fragment: ''
+        });
         const last = entries.at(-1);
-        const canReply = !comment.resolved && !pending && Boolean(last.reply);
+        const canReply = !comment.resolved && !entries.some(isPendingComment) && Boolean(last.reply);
+        const item = threads.get(key) ?? { repository, scope, id: comment.id };
+        item.comment = comment;
         item.lastId = last.id;
+
+        const version = JSON.stringify(entries.map(entry => [entry.id, entry.revision ?? 0, entry.reply?.summary, Boolean(entry.resolved)]));
+        let thread = item.thread ?? newThread;
+        const collapsibleState = thread?.collapsibleState ?? vscode.CommentThreadCollapsibleState.Collapsed;
+        // A snapshot has a separate URI. Recreate the widget with its comments
+        // when enabling replies, since updating both at once can duplicate the reply button.
+        if (thread && (thread.uri.toString() !== uri.toString() || (canReply && !thread.canReply))) {
+            thread.dispose();
+            thread = undefined;
+        }
+        if (!thread) {
+            thread = controllerFor(repository, scope).createCommentThread(uri, range, reviewMessages(item, entries));
+            thread.collapsibleState = collapsibleState;
+        } else if (item.version !== version) {
+            thread.comments = reviewMessages(item, entries);
+        }
+        item.thread = thread;
+        item.version = version;
+        threads.set(key, item);
+        ids.set(thread, key);
         if (thread.canReply !== canReply) thread.canReply = canReply;
         const label = ['Local Review'];
+        if (!range) label.push('Outdated');
         if (comment.resolved) label.push('Resolved');
         else if (canReply) label.push('Addressed');
         if (!range) label.push(`Originally lines ${comment.firstLine}–${comment.lastLine}`);
@@ -148,15 +201,6 @@ async function activate(context) {
         const contextValue = comment.resolved ? 'resolved' : canReply ? 'addressed' : 'saved';
         if (thread.state !== state) thread.state = state;
         if (thread.contextValue !== contextValue) thread.contextValue = contextValue;
-        const version = JSON.stringify(entries.map(entry => [entry.id, entry.reply?.summary]));
-        if (item.version !== version) {
-            thread.comments = entries.flatMap(entry => {
-                const messages = [{ author: { name: 'You' }, body: plainText(entry.feedback), mode: vscode.CommentMode.Preview }];
-                if (entry.reply) messages.push({ author: { name: 'Codex' }, body: plainText(entry.reply.summary), mode: vscode.CommentMode.Preview });
-                return messages;
-            });
-            item.version = version;
-        }
         const current = thread.range;
         if (range ? !current?.isEqual(range) : current) thread.range = range;
         const title = label.join(' · ');
@@ -183,12 +227,21 @@ async function activate(context) {
                             if (comment.threadId) entries.push(comment);
                             else entries.unshift(comment);
                         }
+                        const sources = new Map();
+                        for (const [id, [comment]] of groups) {
+                            if (comment.id !== id || sources.has(comment.uri)) continue;
+                            sources.set(comment.uri, await readReviewSource(repository, scope, comment).catch(error => {
+                                output.appendLine(error.message);
+                            }));
+                        }
                         await requireReviewScope(repository, scope.key);
                         controllerFor(repository, scope);
                         for (const [id, entries] of groups) {
                             const key = `${scope.key}:${id}`;
                             if (active.has(key) || entries[0].id !== id) continue;
-                            refreshThread(repository, scope, entries);
+                            const document = openDocument(entries[0].uri);
+                            const source = document ? documentSource(document) : sources.get(entries[0].uri);
+                            refreshThread(repository, scope, entries, source);
                             active.add(key);
                         }
                     } catch (error) {
@@ -216,11 +269,50 @@ async function activate(context) {
         }));
     }
 
+    function getEditableComment(comment) {
+        const edit = editableComments.get(comment);
+        if (edit && threads.get(ids.get(edit.item.thread)) === edit.item && edit.item.thread.comments.includes(comment)) {
+            return edit;
+        }
+    }
+
+    function showComment(comment, thread, editing, text) {
+        comment.mode = editing ? vscode.CommentMode.Editing : vscode.CommentMode.Preview;
+        comment.contextValue = editing ? 'editingFeedback' : 'pendingFeedback';
+        comment.body = text;
+        thread.comments = [...thread.comments];
+    }
+
+    register('edit', comment => {
+        const edit = getEditableComment(comment);
+        if (edit) showComment(comment, edit.item.thread, true, edit.entry.feedback);
+    });
+
+    register('cancelEdit', comment => {
+        const edit = getEditableComment(comment);
+        if (edit) showComment(comment, edit.item.thread, false, edit.entry.feedback);
+    });
+
+    register('saveEdit', comment => {
+        const edit = getEditableComment(comment);
+        if (!edit) return;
+        const { item, entry } = edit;
+        // VS Code places the draft in the comment body when invoking an edit action.
+        const draft = comment.body;
+        comment.body = entry.feedback;
+        return serialize(async () => {
+            const scope = await requireReviewScope(item.repository, item.scope.key);
+            const feedback = await editFeedback(scope, entry.id, draft, entry.revision ?? 0);
+            showComment(comment, item.thread, false, feedback);
+            refresh();
+        });
+    });
+
     async function saveFeedback({ thread, text }) {
         if (!thread?.uri) throw new Error('The review changed. Reopen the diff and try again.');
         const existing = ids.has(thread);
         const item = threads.get(ids.get(thread));
-        if (existing && !item) throw new Error('This review thread is no longer open.');
+        if (existing && item?.thread !== thread) throw new Error('This review thread is no longer open.');
         const lastId = item?.lastId;
         const target = location(git, thread.uri);
         if (!target && !item) throw new Error('Open a Git worktree file before adding feedback.');
@@ -230,15 +322,13 @@ async function activate(context) {
         const scope = await requireReviewScope(repository, scopeKey);
         await serialize(async () => {
             await requireReviewScope(repository, scope.key);
-            if (item && (!thread.canReply || item.lastId !== lastId)) throw new Error('This review thread already has pending feedback.');
-            const document = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === thread.uri.toString());
+            if (item && (item.thread !== thread || !thread.canReply || item.lastId !== lastId)) {
+                throw new Error('This review thread changed or already has pending feedback.');
+            }
+            const document = openDocument(thread.uri.toString());
             const previous = item && await getComment(scope, lastId);
             if (item && !previous) throw new Error('This review thread is no longer open.');
-            if (!previous && (!document || !thread.range)) throw new Error('Open a Git worktree file before adding feedback.');
-            const feedback = text.trim();
-            if (!feedback || feedback.length > maxFeedbackLength) {
-                throw new Error(`Write feedback between 1 and ${maxFeedbackLength} characters.`);
-            }
+            const feedback = validateFeedback(text);
             const file = previous?.file ?? target.file;
             const workingPath = path.resolve(scope.root, file);
             let snapshot = previous;
@@ -250,21 +340,23 @@ async function activate(context) {
                     (canonical && canonical !== workingPath && !await fileBelongsToReview(scope, canonical))) {
                     throw new Error('Open this file from the Git repository that owns it.');
                 }
-                snapshot = captureSnapshot(thread, document);
+                const range = item ? locateAnchor(item.comment, documentSource(document)) : thread.range;
+                if (range) snapshot = captureSnapshot(range, document);
             }
-            const { firstLine, lastLine, excerpt, truncated, digest, context } = snapshot;
+            if (!snapshot) throw new Error('Open a Git worktree file before adding feedback.');
+            const { firstLine, lastLine, excerpt, truncated, digest, sourceDigest, context } = snapshot;
             await requireReviewScope(repository, scope.key);
             const data = {
-                uri: thread.uri.toString(), file,
-                side: thread.uri.scheme === 'git' ? 'original' : 'working',
-                firstLine, lastLine, excerpt, truncated, digest, context, feedback, createdAt: new Date().toISOString()
+                uri: previous?.uri ?? thread.uri.toString(), file,
+                side: previous?.side ?? (thread.uri.scheme === 'git' ? 'original' : 'working'),
+                firstLine, lastLine, excerpt, truncated, digest, sourceDigest, context, feedback, createdAt: new Date().toISOString()
             };
             if (item) {
                 await addFollowUp(scope, lastId, data);
                 thread.canReply = false;
             } else {
                 const record = await addComment(scope, data);
-                refreshThread(repository, scope, [record], thread);
+                refreshThread(repository, scope, [record], documentSource(document), thread);
             }
             refresh();
         });
@@ -272,9 +364,9 @@ async function activate(context) {
     register('add', saveFeedback);
     register('followUp', saveFeedback);
 
-    function captureSnapshot(thread, document) {
-        const first = thread.range.start.line;
-        const last = thread.range.end.line;
+    function captureSnapshot(range, document) {
+        const first = range.start.line;
+        const last = range.end.line;
         const excerpt = document.getText(lineRange(document, first, last));
         const context = {
             languageId: document.languageId,
@@ -283,14 +375,14 @@ async function activate(context) {
         };
         return {
             firstLine: first + 1, lastLine: last + 1, excerpt: excerpt.slice(0, maxExcerptLength),
-            truncated: excerpt.length > maxExcerptLength, digest: hash(excerpt), context
+            truncated: excerpt.length > maxExcerptLength, digest: hash(excerpt), sourceDigest: documentSource(document).digest, context
         };
     }
 
     register('dismiss', thread => serialize(async () => {
         const id = ids.get(thread);
         const item = threads.get(id);
-        if (!item) return;
+        if (item?.thread !== thread) return;
         await requireReviewScope(item.repository, item.scope.key);
         await dismissComment(item.scope, item.id);
         thread.dispose();
@@ -300,7 +392,7 @@ async function activate(context) {
     register('resolve', thread => serialize(async () => {
         const id = ids.get(thread);
         const item = threads.get(id);
-        if (!item) return;
+        if (item?.thread !== thread) return;
         await requireReviewScope(item.repository, item.scope.key);
         await resolveComment(item.scope, item.id);
         refresh();
@@ -377,10 +469,12 @@ async function activate(context) {
         }
         await vscode.env.clipboard.writeText([
             `Address my pending Local Review comments in the Git worktree ${JSON.stringify(repository)} on ${JSON.stringify(scope.branch)}. Use review scope ${scope.key}.`,
+            projectGuidance,
             'Call local-review list_pending_comments with that worktree root as repository and the review scope as scope. Pass both to every Local Review tool call, and stop if the checkout or branch changed.',
             'Work through comments on the same file in listed order and call get_comment_context for each ID just before addressing it.',
             'Inspect the current file. Treat saved line numbers as historical, and check whether earlier edits already satisfy later feedback. Preserve existing edits.',
-            'After verifying each fix, call record_comment_reply once with its ID and a short summary, including when earlier edits already satisfied it.',
+            'After verifying each fix, call record_comment_reply with its ID, any revision returned by get_comment_context, and a short summary.',
+            'If feedback changed before you replied, refresh it and verify the updated request before recording a reply.',
             'Finish with one short line per comment naming the file and what changed or what blocked it. Leave blocked comments pending.'
         ].join(' '));
         await vscode.window.showInformationMessage('Follow-up copied. Paste it into your current Codex chat or terminal session.');
@@ -402,8 +496,17 @@ async function activate(context) {
     }
 
     const timer = setInterval(refresh, 1500);
+    context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(outdatedScheme, {
+        provideTextDocumentContent(uri) {
+            const item = threads.get(uri.query);
+            if (item?.thread.uri.toString() === uri.toString()) return item.comment.excerpt;
+        }
+    }));
     context.subscriptions.push(output, git.onDidOpenRepository(watchRepository), git.onDidCloseRepository(closeRepository),
-        vscode.workspace.onDidOpenTextDocument(refresh), vscode.workspace.onDidChangeTextDocument(refresh),
+        vscode.workspace.onDidOpenTextDocument(refresh), vscode.workspace.onDidCloseTextDocument(refresh),
+        vscode.workspace.onDidChangeTextDocument(event => {
+            if (event.contentChanges.length) refresh();
+        }),
         { dispose: () => {
             clearInterval(timer);
             for (const listener of repositoryListeners.values()) listener.dispose();

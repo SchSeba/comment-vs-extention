@@ -12,6 +12,15 @@ const hash = text => createHash('sha256').update(text).digest('hex');
 const gitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_')));
 
 const isPendingComment = comment => !comment.reply && !comment.resolved;
+const feedbackUpdate = (directory, revision) => path.join(directory, `feedback-${revision}.json`);
+
+function validateFeedback(text) {
+    const feedback = text.trim();
+    if (!feedback || feedback.length > maxFeedbackLength) {
+        throw new Error(`Write feedback between 1 and ${maxFeedbackLength} characters.`);
+    }
+    return feedback;
+}
 
 function storeRoot() {
     return path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'local-review');
@@ -129,10 +138,24 @@ async function commentIds(store) {
 async function readComment(directory) {
     const comment = await readJson(path.join(directory, 'comment.json'));
     if (!comment) return undefined;
-    const reply = await readJson(path.join(directory, 'reply.json'));
+    let reply;
+    let feedback = comment.feedback;
+    let revision = 0;
+    while (!reply) {
+        const update = await readJson(feedbackUpdate(directory, revision));
+        if (!update) break;
+        if (update.reply) {
+            reply = update.reply;
+        } else {
+            feedback = update.feedback;
+            revision++;
+        }
+    }
+    // Older MCP servers saved replies directly against the original feedback.
+    if (revision === 0 && !reply) reply = await readJson(path.join(directory, 'reply.json'));
     const resolved = Boolean(await readJson(path.join(directory, 'resolved.json')));
     const next = await readJson(path.join(directory, 'next.json'));
-    return { ...comment, reply, resolved, next };
+    return { ...comment, feedback, revision, reply, resolved, next };
 }
 
 async function getComment(repository, id) {
@@ -170,16 +193,34 @@ async function listComments(repository) {
     return threads.flat();
 }
 
-async function recordReply(repository, id, reply) {
-    if (!idPattern.test(id)) throw new Error('Invalid review comment ID.');
-    const directory = path.join(await repositoryStore(repository), id);
-    const comment = await getComment({ store: path.dirname(directory) }, id);
+async function editFeedback(repository, id, text, revision) {
+    const feedback = validateFeedback(text);
+    const store = await repositoryStore(repository);
+    const comment = await getComment({ store }, id);
+    if (!comment || !isPendingComment(comment)) throw new Error('Only pending feedback can be edited.');
+    if (comment.revision !== revision) throw new Error('Feedback changed. Reopen the editor and try again.');
+    if (feedback === comment.feedback) return feedback;
+
+    // An edit and a reply to the same revision compete for one slot.
+    const file = feedbackUpdate(path.join(store, id), revision);
+    if (!await createJson(file, { feedback })) throw new Error('Feedback was edited or answered while you were editing.');
+    return feedback;
+}
+
+async function recordReply(repository, id, reply, revision = 0) {
+    const store = await repositoryStore(repository);
+    const comment = await getComment({ store }, id);
     if (!comment || (comment.resolved && !comment.reply)) throw new Error('This comment is no longer available in the current review.');
-    const file = path.join(directory, 'reply.json');
-    if (await createJson(file, reply)) return { status: 'recorded', reply };
+    const changed = 'Feedback changed. Refresh it with get_comment_context before replying.';
+    if (comment.revision !== revision) throw new Error(changed);
+    if (comment.reply) return { status: 'already_recorded', reply: comment.reply };
+
+    const file = feedbackUpdate(path.join(store, id), revision);
+    if (await createJson(file, { reply })) return { status: 'recorded', reply };
     const saved = await readJson(file);
     if (!saved) throw new Error('This comment was dismissed.');
-    return { status: 'already_recorded', reply: saved };
+    if (!saved.reply) throw new Error(changed);
+    return { status: 'already_recorded', reply: saved.reply };
 }
 
 async function dismissComment(repository, id) {
@@ -262,7 +303,7 @@ async function adoptLegacyComments(scope) {
 }
 
 module.exports = {
-    addComment, addFollowUp, adoptLegacyComments, cleanReview, dismissComment, fileBelongsToReview, getComment, getReviewScope,
-    isPendingComment, listComments, listLegacyComments, maxFeedbackLength, recordReply, requireReviewScope,
-    resolveAnsweredComments, resolveComment, storeRoot
+    addComment, addFollowUp, adoptLegacyComments, cleanReview, dismissComment, editFeedback, fileBelongsToReview,
+    getComment, getReviewScope, isPendingComment, listComments, listLegacyComments, recordReply, requireReviewScope,
+    resolveAnsweredComments, resolveComment, storeRoot, validateFeedback
 };

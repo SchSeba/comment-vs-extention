@@ -3,9 +3,12 @@ const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio
 const { z } = require('zod');
 const { cleanReview, fileBelongsToReview, getComment, isPendingComment, listComments, recordReply, requireReviewScope, resolveAnsweredComments } = require('./review-store.cjs');
 const { readWorkingContext } = require('./review-context.cjs');
+const { projectGuidance } = require('./review-guidance.cjs');
 const { version } = require('./package.json');
 
-const server = new McpServer({ name: 'local-review', version });
+const server = new McpServer({ name: 'local-review', version }, {
+    instructions: `When addressing pending Local Review comments, first check project guidance. ${projectGuidance}`
+});
 const repository = z.string().min(1).describe('Absolute Git worktree root (git rev-parse --show-toplevel).');
 const scope = z.string().regex(/^[0-9a-f]{64}$/).optional()
     .describe('Review scope from the copied prompt or pending comment. Pass it to subsequent calls to detect a checkout or branch change.');
@@ -23,13 +26,14 @@ function reviewPayload(comment, scope) {
         lastLine: comment.lastLine,
         excerpt: comment.excerpt,
         feedback: comment.feedback,
+        ...(comment.revision && { revision: comment.revision }),
         ...(comment.truncated && { excerptTruncated: true }),
         ...(comment.context && { context: comment.context })
     };
 }
 
 server.registerTool('list_pending_comments', {
-    description: 'List pending Local Review feedback for the current Git checkout and branch. Pass each returned scope to subsequent calls, and call get_comment_context just before addressing each comment.',
+    description: 'List pending Local Review feedback for the current Git checkout and branch. Read the checkout and ai-plugins project guidance first. Pass each returned scope to subsequent calls, and call get_comment_context just before addressing each comment.',
     inputSchema: { repository, scope },
     annotations: { readOnlyHint: true, openWorldHint: false }
 }, async ({ repository, scope }) => {
@@ -39,6 +43,28 @@ server.registerTool('list_pending_comments', {
     return result(comments.filter(isPendingComment)
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
         .map(comment => reviewPayload(comment, current)));
+});
+
+server.registerTool('list_review_history', {
+    description: 'List feedback and verified reply summaries from completed Local Review threads in the current Git checkout and branch, including resolved threads. Threads with unanswered follow-ups are omitted. Use as local evidence for review learnings.',
+    inputSchema: { repository, scope },
+    annotations: { readOnlyHint: true, openWorldHint: false }
+}, async ({ repository, scope }) => {
+    const current = await requireReviewScope(repository, scope);
+    const comments = await listComments(current);
+    await requireReviewScope(repository, current.key);
+    const incomplete = new Set(comments.filter(comment => !comment.reply).map(comment => comment.threadId ?? comment.id));
+    return result(comments.filter(comment => !incomplete.has(comment.threadId ?? comment.id))
+        .map(comment => ({
+            id: comment.id,
+            threadId: comment.threadId ?? comment.id,
+            scope: current.key,
+            branch: current.branch,
+            file: comment.file,
+            feedback: comment.feedback,
+            summary: comment.reply.summary,
+            resolved: comment.resolved
+        })));
 });
 
 server.registerTool('get_comment_context', {
@@ -60,16 +86,17 @@ server.registerTool('get_comment_context', {
 });
 
 server.registerTool('record_comment_reply', {
-    description: 'Save one short, user-visible summary after applying and verifying a Local Review comment. Use the exact ID returned by list_pending_comments. Leave blocked or unapplied comments pending and explain them in your Codex response.',
+    description: 'Save one short, user-visible summary after applying and verifying a Local Review comment. Use the ID and revision from get_comment_context. If feedback changed, refresh it and verify the updated request before replying. Leave blocked or unapplied comments pending.',
     inputSchema: {
         repository,
         scope,
         id: z.string().uuid(),
+        revision: z.number().int().nonnegative().optional().describe('Pass the revision returned by get_comment_context when present.'),
         summary: z.string().trim().min(1).max(1500)
     },
     annotations: { idempotentHint: true, destructiveHint: false, openWorldHint: false }
-}, async ({ repository, scope, id, summary }) =>
-    result(await recordReply(await requireReviewScope(repository, scope), id, { summary })));
+}, async ({ repository, scope, id, revision, summary }) =>
+    result(await recordReply(await requireReviewScope(repository, scope), id, { summary }, revision)));
 
 server.registerTool('mark_resolved_review', {
     description: 'Mark fully answered Local Review threads as resolved for the current checkout and branch. Only call when the user explicitly requests it. Threads with pending follow-ups and all replies are preserved.',

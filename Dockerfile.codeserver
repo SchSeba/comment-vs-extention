@@ -27,7 +27,7 @@ USER root
 WORKDIR /opt/build-local-review
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY .vscodeignore README.md extension.cjs review-store.cjs review-context.cjs mcp.cjs ./
+COPY .vscodeignore README.md extension.cjs review-store.cjs review-context.cjs review-guidance.cjs mcp.cjs ./
 COPY skills/ ./skills/
 RUN npm run package
 
@@ -42,6 +42,8 @@ RUN set -eu; \
     test -f "$1"; \
     skills="$(dirname "$1")/skills"; \
     test -f "$skills/handle-comments/SKILL.md"; \
+    test -f "$skills/learn-from-comments/SKILL.md"; \
+    test -f "$skills/publish-review-learnings/SKILL.md"; \
     test -f "$skills/mark-resolved-review/SKILL.md"; \
     test -f "$skills/clean-review/SKILL.md"; \
     ln -s "$1" /opt/local-review-mcp.cjs; \
