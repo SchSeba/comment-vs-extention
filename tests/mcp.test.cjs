@@ -326,6 +326,7 @@ test('successive follow-ups are pending with fresh IDs and preserve the thread h
     const final = await addFollowUp(scope, next.id, { ...feedback, feedback: 'One more change' });
     const finalContext = await call('get_comment_context', { repository, id: final.id });
     assert.equal(finalContext.threadId, first.id);
+    assert.deepEqual(finalContext.history, [nextContext.previous, { feedback: 'Try this exact value', summary: 'Second fix' }]);
     assert.deepEqual(finalContext.previous, { feedback: 'Try this exact value', summary: 'Second fix' });
     await call('record_comment_reply', { repository, id: final.id, summary: 'Third fix' });
     const entries = await listComments(scope);

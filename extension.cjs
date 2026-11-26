@@ -2,7 +2,7 @@ const vscode = require('vscode');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { projectGuidance } = require('./review-guidance.cjs');
+const { projectGuidance, handlingGuidance } = require('./review-guidance.cjs');
 const { captureNearbyLines, describeWorkingContext, isInWorktree, maxExcerptLength, readWorkingFile } = require('./review-context.cjs');
 const {
     addComment, addFollowUp, adoptLegacyComments, cleanReview, dismissComment, editFeedback, fileBelongsToReview,
@@ -471,11 +471,7 @@ async function activate(context) {
             `Address my pending Local Review comments in the Git worktree ${JSON.stringify(repository)} on ${JSON.stringify(scope.branch)}. Use review scope ${scope.key}.`,
             projectGuidance,
             'Call local-review list_pending_comments with that worktree root as repository and the review scope as scope. Pass both to every Local Review tool call, and stop if the checkout or branch changed.',
-            'Work through comments on the same file in listed order and call get_comment_context for each ID just before addressing it.',
-            'Inspect the current file. Treat saved line numbers as historical, and check whether earlier edits already satisfy later feedback. Preserve existing edits.',
-            'After verifying each fix, call record_comment_reply with its ID, any revision returned by get_comment_context, and a short summary.',
-            'If feedback changed before you replied, refresh it and verify the updated request before recording a reply.',
-            'Finish with one short line per comment naming the file and what changed or what blocked it. Leave blocked comments pending.'
+            handlingGuidance
         ].join(' '));
         await vscode.window.showInformationMessage('Follow-up copied. Paste it into your current Codex chat or terminal session.');
     });

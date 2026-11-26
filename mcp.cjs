@@ -1,13 +1,13 @@
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
-const { cleanReview, fileBelongsToReview, getComment, isPendingComment, listComments, recordReply, requireReviewScope, resolveAnsweredComments } = require('./review-store.cjs');
+const { cleanReview, fileBelongsToReview, getCommentThread, isPendingComment, listComments, recordReply, requireReviewScope, resolveAnsweredComments } = require('./review-store.cjs');
 const { readWorkingContext } = require('./review-context.cjs');
-const { projectGuidance } = require('./review-guidance.cjs');
+const { projectGuidance, handlingGuidance } = require('./review-guidance.cjs');
 const { version } = require('./package.json');
 
 const server = new McpServer({ name: 'local-review', version }, {
-    instructions: `When addressing pending Local Review comments, first check project guidance. ${projectGuidance}`
+    instructions: `When addressing pending Local Review comments, first check project guidance. ${projectGuidance} ${handlingGuidance}`
 });
 const repository = z.string().min(1).describe('Absolute Git worktree root (git rev-parse --show-toplevel).');
 const scope = z.string().regex(/^[0-9a-f]{64}$/).optional()
@@ -68,25 +68,27 @@ server.registerTool('list_review_history', {
 });
 
 server.registerTool('get_comment_context', {
-    description: 'Refresh a pending comment by ID immediately before addressing it, including after editing another comment in the same file. The original snapshot is historical. A changed range is an area to inspect. Ambiguous, deleted, or unlocated text has no confirmed current line.',
+    description: 'Refresh a pending comment by ID immediately before addressing it, including after editing another comment in the same file. Follow-ups include earlier feedback and reply summaries in thread order. The original snapshot is historical. A changed range is an area to inspect. Ambiguous, deleted, or unlocated text has no confirmed current line.',
     inputSchema: { repository, scope, id: z.string().uuid() },
     annotations: { readOnlyHint: true, openWorldHint: false }
 }, async ({ repository, scope, id }) => {
     const review = await requireReviewScope(repository, scope);
-    const comment = await getComment(review, id);
+    const thread = await getCommentThread(review, id);
+    const comment = thread.find(entry => entry.id === id);
     if (!comment || !isPendingComment(comment)) throw new Error('This comment is no longer pending in the current review.');
-    const previous = comment.previousId && await getComment(review, comment.previousId);
+    const history = thread.filter(entry => entry.reply)
+        .map(entry => ({ feedback: entry.feedback, summary: entry.reply.summary }));
     const current = await readWorkingContext(review.root, comment, file => fileBelongsToReview(review, file));
     await requireReviewScope(repository, review.key);
     return result({
         ...reviewPayload(comment, review),
-        ...(previous?.reply && { previous: { feedback: previous.feedback, summary: previous.reply.summary } }),
+        ...(history.length && { history, previous: history.at(-1) }),
         current
     });
 });
 
 server.registerTool('record_comment_reply', {
-    description: 'Save one short, user-visible summary after applying and verifying a Local Review comment. Use the ID and revision from get_comment_context. If feedback changed, refresh it and verify the updated request before replying. Leave blocked or unapplied comments pending.',
+    description: 'Save one short, user-visible summary with the verified answer or fix and observed evidence after checking the final diff. Use the ID and revision from get_comment_context. If feedback changed, refresh it and verify the updated request before replying. Leave blocked comments pending.',
     inputSchema: {
         repository,
         scope,

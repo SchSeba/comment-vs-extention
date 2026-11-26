@@ -158,14 +158,18 @@ async function readComment(directory) {
     return { ...comment, feedback, revision, reply, resolved, next };
 }
 
-async function getComment(repository, id) {
+async function getCommentThread(repository, id) {
     if (!idPattern.test(id)) throw new Error('Invalid review comment ID.');
     const store = await repositoryStore(repository);
     const comment = await readComment(path.join(store, id));
-    if (!comment) return;
+    if (!comment) return [];
     const root = comment.threadId ? await readComment(path.join(store, comment.threadId)) : comment;
-    if (!root) return;
-    return (await readThread(root, next => readComment(path.join(store, next)))).find(entry => entry.id === id);
+    if (!root) return [];
+    return readThread(root, next => readComment(path.join(store, next)));
+}
+
+async function getComment(repository, id) {
+    return (await getCommentThread(repository, id)).find(entry => entry.id === id);
 }
 
 async function readThread(root, getNext) {
@@ -304,6 +308,6 @@ async function adoptLegacyComments(scope) {
 
 module.exports = {
     addComment, addFollowUp, adoptLegacyComments, cleanReview, dismissComment, editFeedback, fileBelongsToReview,
-    getComment, getReviewScope, isPendingComment, listComments, listLegacyComments, recordReply, requireReviewScope,
+    getComment, getCommentThread, getReviewScope, isPendingComment, listComments, listLegacyComments, recordReply, requireReviewScope,
     resolveAnsweredComments, resolveComment, storeRoot, validateFeedback
 };

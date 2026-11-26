@@ -45,3 +45,7 @@ Using the same client versions and disposable repositories, replacing the review
 ## Project guidance and retrospective
 
 Codex CLI 0.171.0 discovered all five packaged skills via the app server and found the packaged MCP registration in a disposable `CODEX_HOME`. The stdio tests with Node.js 22.17.0 and Git 2.55.0 verified the project guidance in the MCP initialization instructions, completed thread history, and worktree and branch isolation. A temporary clone of ai-plugins at `79d355f9d1a2b01c7987cb057068529ff4ba13b4` passed its Markdown lint. A signed-in model retrospective and publication to ai-plugins remain untested.
+
+## Verification before replying
+
+The stdio MCP suite passed all 17 tests on Node.js 22.17.0. In a thread with two answered comments and a pending third comment, `get_comment_context` returned both earlier feedback/reply pairs in order, including the reviewer's edited follow-up. The VSIX passed archive and contents verification. This run used disposable Git fixtures. Signed-in CLI and sidebar handling of the revised instructions remain untested.
