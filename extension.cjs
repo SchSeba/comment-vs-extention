@@ -2,7 +2,7 @@ const vscode = require('vscode');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { projectGuidance, handlingGuidance } = require('./review-guidance.cjs');
+const { copiedFollowUp } = require('./review-guidance.cjs');
 const { captureNearbyLines, describeWorkingContext, isInWorktree, maxExcerptLength, readWorkingFile } = require('./review-context.cjs');
 const {
     addComment, addFollowUp, adoptLegacyComments, cleanReview, dismissComment, editFeedback, fileBelongsToReview,
@@ -467,12 +467,7 @@ async function activate(context) {
             await vscode.window.showInformationMessage('No pending Local Review comments on this branch.');
             return;
         }
-        await vscode.env.clipboard.writeText([
-            `Address my pending Local Review comments in the Git worktree ${JSON.stringify(repository)} on ${JSON.stringify(scope.branch)}. Use review scope ${scope.key}.`,
-            projectGuidance,
-            'Call local-review list_pending_comments with that worktree root as repository and the review scope as scope. Pass both to every Local Review tool call, and stop if the checkout or branch changed.',
-            handlingGuidance
-        ].join(' '));
+        await vscode.env.clipboard.writeText(copiedFollowUp(repository, scope));
         await vscode.window.showInformationMessage('Follow-up copied. Paste it into your current Codex chat or terminal session.');
     });
 

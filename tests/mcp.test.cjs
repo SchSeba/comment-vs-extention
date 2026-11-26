@@ -10,6 +10,8 @@ const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio
 const { addComment, addFollowUp, adoptLegacyComments, dismissComment, editFeedback, getReviewScope, listComments, recordReply, resolveComment, storeRoot } = require('../review-store.cjs');
 const { captureNearbyLines } = require('../review-context.cjs');
 
+const { copiedFollowUp } = require('../review-guidance.cjs');
+
 let temp;
 let repository;
 let otherRepository;
@@ -44,10 +46,30 @@ async function call(name, args) {
     return JSON.parse(result.content[0].text);
 }
 
+test('all handling entry points put the change in chat before processing feedback', async () => {
+    const scope = await getReviewScope(repository);
+    const prompt = copiedFollowUp(repository, scope);
+    assert.ok(prompt.includes(JSON.stringify(repository)) && prompt.includes(scope.key));
+    const shortcut = await fs.readFile(path.join(__dirname, '../skills/handle-comments/SKILL.md'), 'utf8');
+    for (const instructions of [client.getInstructions(), prompt, shortcut]) {
+        const overview = instructions.search(/account in chat/i);
+        const feedback = instructions.search(/list_pending_comments|get_comment_context/);
+        assert.ok(overview >= 0 && feedback > overview);
+        const preparation = instructions.slice(0, overview);
+        for (const concept of [/current chat/i, /README/, /AGENTS\.md/, /merge base/, /staged|--cached/,
+            /unstaged|`git diff`/, /untracked files/, /without comments/, /callers and tests/]) {
+            assert.match(preparation, concept);
+        }
+        const discussion = instructions.slice(overview, feedback);
+        assert.match(discussion, /specific question/i);
+        assert.match(discussion, /wait/i);
+        assert.match(discussion, /later rounds in this chat.*reuse/is);
+    }
+});
+
 test('MCP lists worktree comments and preserves the first summary across concurrent replies', async () => {
     assert.deepEqual((await client.listTools()).tools.map(tool => tool.name).sort(),
         ['clean_review', 'get_comment_context', 'list_pending_comments', 'list_review_history', 'mark_resolved_review', 'record_comment_reply']);
-    assert.match(client.getInstructions(), /Before fetching or addressing comments/);
     assert.match(client.getInstructions(), /github\.com\/SchSeba\/ai-plugins.*CODING\.md, REVIEWING\.md, and VALIDATION\.md/);
     const comment = await addComment(repository, {
         file: 'src/main.js', side: 'working', firstLine: 4, lastLine: 5,

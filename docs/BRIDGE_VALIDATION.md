@@ -49,3 +49,7 @@ Codex CLI 0.171.0 discovered all five packaged skills via the app server and fou
 ## Verification before replying
 
 The stdio MCP suite passed all 17 tests on Node.js 22.17.0. In a thread with two answered comments and a pending third comment, `get_comment_context` returned both earlier feedback/reply pairs in order, including the reviewer's edited follow-up. The VSIX passed archive and contents verification. This run used disposable Git fixtures. Signed-in CLI and sidebar handling of the revised instructions remain untested.
+
+## First-round review context
+
+On Node.js 22.17.0 and Git 2.55.0, all 18 automated tests passed. The new test inspected the MCP initialization instructions over stdio, the generated clipboard prompt, and the bundled shortcut source. It checked that each requests a full diff and a chat explanation before comment handling, asks about unresolved intent, and reuses context on later rounds. The VSIX passed archive and contents verification. Signed-in CLI and sidebar behavior for this instruction change remains untested.

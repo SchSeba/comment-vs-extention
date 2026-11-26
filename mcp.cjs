@@ -3,11 +3,11 @@ const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio
 const { z } = require('zod');
 const { cleanReview, fileBelongsToReview, getCommentThread, isPendingComment, listComments, recordReply, requireReviewScope, resolveAnsweredComments } = require('./review-store.cjs');
 const { readWorkingContext } = require('./review-context.cjs');
-const { projectGuidance, handlingGuidance } = require('./review-guidance.cjs');
+const { projectGuidance, changeGuidance, handlingGuidance } = require('./review-guidance.cjs');
 const { version } = require('./package.json');
 
 const server = new McpServer({ name: 'local-review', version }, {
-    instructions: `When addressing pending Local Review comments, first check project guidance. ${projectGuidance} ${handlingGuidance}`
+    instructions: `When addressing pending Local Review comments, use this workflow. ${projectGuidance} ${changeGuidance} ${handlingGuidance}`
 });
 const repository = z.string().min(1).describe('Absolute Git worktree root (git rev-parse --show-toplevel).');
 const scope = z.string().regex(/^[0-9a-f]{64}$/).optional()
@@ -33,7 +33,7 @@ function reviewPayload(comment, scope) {
 }
 
 server.registerTool('list_pending_comments', {
-    description: 'List pending Local Review feedback for the current Git checkout and branch. Read the checkout and ai-plugins project guidance first. Pass each returned scope to subsequent calls, and call get_comment_context just before addressing each comment.',
+    description: 'List pending Local Review feedback for the current Git checkout and branch. First follow the server instructions to establish or refresh the change context in chat. Pass each returned scope to subsequent calls, and call get_comment_context just before addressing each comment.',
     inputSchema: { repository, scope },
     annotations: { readOnlyHint: true, openWorldHint: false }
 }, async ({ repository, scope }) => {
